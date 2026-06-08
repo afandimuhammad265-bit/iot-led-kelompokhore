@@ -1,9 +1,9 @@
 // C++ code
 //
 
-int led_merah = 2;
-int led_kuning = 3;
-int led_hijau = 5;
+int led_merah = 4;
+int led_kuning = 2;
+int led_hijau = 13;
 
 void setup()
 {
