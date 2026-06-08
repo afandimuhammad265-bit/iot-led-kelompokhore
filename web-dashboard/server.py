@@ -1,50 +1,79 @@
 from flask import Flask, render_template, request, jsonify
 import serial
-import threading
+import time
 
 app = Flask(__name__)
 
+arduino_connected = False
+arduino = None
+
 try:
-    arduino = serial.Serial('COM4', 9600, timeout=1)
+    # Membuka port serial. Flask yang mengunci COM3, bukan browser!
+    arduino = serial.Serial(
+        port='COM3',
+        baudrate=9600,
+        timeout=1
+    )
+    time.sleep(2)  # Memberi jeda waktu reset otomatis Arduino
     arduino_connected = True
-except:
-    arduino_connected = False
-    print("Arduino tidak terdeteksi, mode simulasi aktif")
+    print("=== ARDUINO BERHASIL TERHUBUNG PADA COM3 ===")
 
-ldr_value = 0
-led_status = {"LED1": False, "LED2": False, "LED3": False, "LED4": False}
+except Exception as e:
+    print("=== ARDUINO GAGAL TERHUBUNG ===")
+    print(e)
 
-def read_serial():
-    global ldr_value
-    while arduino_connected:
-        try:
-            line = arduino.readline().decode().strip()
-            if line.startswith("LDR:"):
-                ldr_value = int(line.split(":")[1])
-        except:
-            pass
-
-if arduino_connected:
-    thread = threading.Thread(target=read_serial, daemon=True)
-    thread.start()
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
+
 @app.route('/control', methods=['POST'])
 def control():
-    cmd = request.json.get('cmd', '')
-    led = request.json.get('led', '')
-    state = request.json.get('state', False)
-    if arduino_connected:
-        arduino.write((cmd + '\n').encode())
-    led_status[led] = state
-    return jsonify({"status": "ok", "cmd": cmd})
+    global arduino_connected
+    data = request.get_json()
+    cmd = data.get('cmd', '')
+
+    serial_cmd = None
+
+    # Pemetaan Command sesuai dengan isi kode Arduino kamu
+    if cmd == "MATI_SEMUA":
+        serial_cmd = "M"
+    elif cmd == "NYALA_SEMUA":
+        serial_cmd = "N"
+    elif cmd == "DISCO":
+        serial_cmd = "D"
+    elif cmd == "TRAFFIC":
+        serial_cmd = "T"
+    elif cmd in ["SIGNAL_0", "SIGNAL_1", "SIGNAL_2", "SIGNAL_3"]:
+        # Mengambil angka terakhir saja ('0', '1', '2', atau '3')
+        serial_cmd = cmd.split("_")[1]
+
+    # Mengirimkan karakter ke Arduino via Python
+    if arduino_connected and serial_cmd:
+        try:
+            arduino.write(serial_cmd.encode())
+            print(f"[WEB API] Command: {cmd} -> Dikirim ke Serial: {serial_cmd}")
+            return jsonify({"status": "success", "cmd": cmd, "serial": serial_cmd})
+        except Exception as e:
+            print("Gagal mengirim data serial:", e)
+            arduino_connected = False
+            return jsonify({"status": "error", "message": "Koneksi serial terputus"}), 500
+    else:
+        return jsonify({"status": "failed", "message": "Arduino tidak terdeteksi/command salah"}), 400
+
 
 @app.route('/status')
 def status():
-    return jsonify({"ldr": ldr_value, "leds": led_status, "arduino": arduino_connected})
+    return jsonify({
+        "arduino": arduino_connected
+    })
+
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(
+        host='0.0.0.0',
+        port=5000,
+        debug=False,
+        use_reloader=False
+    )
